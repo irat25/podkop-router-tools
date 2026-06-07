@@ -47,6 +47,7 @@ sh <(wget -O - https://raw.githubusercontent.com/irat25/podkop-router-tools/main
 - start/stop/restart сервиса
 - enable/disable автозапуска
 - `tailscale up` / `tailscale down`
+- ввод нового auth key без отображения текущего ключа
 - проброс LuCI через Tailscale Serve на порты `80` и `8081`
 - проброс SSH через Tailscale Serve на порт `2222`
 

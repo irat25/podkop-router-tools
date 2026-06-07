@@ -447,6 +447,10 @@ case "$1" in
 	enable) /etc/init.d/tailscale enable 2>&1 ;;
 	disable) /etc/init.d/tailscale disable 2>&1 ;;
 	up) tailscale_cmd up ;;
+	authkey)
+		[ -n "${2:-}" ] || { echo "auth key is empty" >&2; exit 1; }
+		tailscale_cmd up --authkey "$2"
+		;;
 	down) tailscale_cmd down ;;
 	serve-luci-80) tailscale_cmd serve --bg --tcp=80 tcp://127.0.0.1:80 ;;
 	serve-luci-8081) tailscale_cmd serve --bg --tcp=8081 tcp://127.0.0.1:80 ;;
@@ -454,7 +458,7 @@ case "$1" in
 	clear-serve-80) tailscale_cmd serve --tcp=80 off ;;
 	clear-serve-8081) tailscale_cmd serve --tcp=8081 off ;;
 	clear-serve-2222) tailscale_cmd serve --tcp=2222 off ;;
-	*) echo "Usage: $0 status|start|stop|restart|enable|disable|up|down|serve-luci-80|serve-luci-8081|serve-ssh-2222|clear-serve-80|clear-serve-8081|clear-serve-2222" >&2; exit 1 ;;
+	*) echo "Usage: $0 status|start|stop|restart|enable|disable|up|authkey|down|serve-luci-80|serve-luci-8081|serve-ssh-2222|clear-serve-80|clear-serve-8081|clear-serve-2222" >&2; exit 1 ;;
 esac
 EOF_TAILSCALE_LUCI
 chmod +x /usr/libexec/tailscale-tools-luci
@@ -712,6 +716,11 @@ return view.extend({
 	},
 	render: function() {
 		var summary = E('div'), status = pre('loading'), netcheck = pre('loading'), logs = pre('loading');
+		var authKey = E('input', {
+			'type': 'password',
+			'placeholder': 'Новый auth key',
+			'style': 'min-width:360px;max-width:100%;margin-right:8px'
+		});
 		var self = this;
 		function button(title, action, style) {
 			return E('button', { 'class': 'btn cbi-button cbi-button-' + (style || 'action'), 'click': function(ev) {
@@ -720,6 +729,22 @@ return view.extend({
 					return self.refresh({ summary: summary, status: status, netcheck: netcheck, logs: logs });
 				});
 			}}, title);
+		}
+		function authButton() {
+			return E('button', { 'class': 'btn cbi-button cbi-button-apply', 'click': function(ev) {
+				var key = authKey.value.trim();
+				ev.preventDefault();
+				if (!key) {
+					ui.addNotification(null, E('p', {}, 'Auth key is empty'), 'warning');
+					return Promise.resolve();
+				}
+				return run([ 'authkey', key ]).then(function(res) {
+					authKey.value = '';
+					notify(res);
+				}).then(function() {
+					return self.refresh({ summary: summary, status: status, netcheck: netcheck, logs: logs });
+				});
+			}}, 'Apply new auth key');
 		}
 		poll.add(L.bind(this.refresh, this, { summary: summary, status: status, netcheck: netcheck, logs: logs }), 8);
 		setTimeout(L.bind(this.refresh, this, { summary: summary, status: status, netcheck: netcheck, logs: logs }), 100);
@@ -738,6 +763,7 @@ return view.extend({
 				button('tailscale up', 'up', 'apply'), ' ',
 				button('tailscale down', 'down', 'reset')
 			]),
+			E('p', {}, [ authKey, authButton() ]),
 			E('h3', {}, 'Tailscale Serve'),
 			E('p', {}, [
 				button('LuCI :80', 'serve-luci-80', 'apply'), ' ',
