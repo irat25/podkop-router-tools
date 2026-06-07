@@ -5,22 +5,23 @@
 - Podkop Watchdog
 - Podkop Auto Update
 - Podkop Updater TG
+- Tailscale Tools
 
 В репозитории нет паролей, Telegram-токенов, authkey Tailscale или приватных конфигов.
 
 ## Установка
 
-После публикации репозитория в GitHub установку можно запускать на роутере так:
+Для BusyBox `ash` на OpenWrt используйте такой вариант:
 
 ```sh
-sh <(wget -O - https://raw.githubusercontent.com/OWNER/REPO/main/install.sh)
+wget -O /tmp/podkop-router-tools-install.sh https://raw.githubusercontent.com/irat25/podkop-router-tools/main/install.sh
+sh /tmp/podkop-router-tools-install.sh
 ```
 
-Для BusyBox `ash`, где `<(...)` может не работать:
+Если оболочка поддерживает process substitution, можно одной строкой:
 
 ```sh
-wget -O /tmp/podkop-router-tools-install.sh https://raw.githubusercontent.com/OWNER/REPO/main/install.sh
-sh /tmp/podkop-router-tools-install.sh
+sh <(wget -O - https://raw.githubusercontent.com/irat25/podkop-router-tools/main/install.sh)
 ```
 
 После установки в LuCI появятся:
@@ -28,6 +29,7 @@ sh /tmp/podkop-router-tools-install.sh
 - `Services -> Podkop Watchdog`
 - `Services -> Podkop Auto Update`
 - `Services -> Podkop Updater TG`
+- `VPN -> Tailscale`
 
 ## Расписание
 
@@ -35,6 +37,18 @@ sh /tmp/podkop-router-tools-install.sh
 
 - Watchdog: каждую минуту
 - Auto Update: ежедневно в 10:00
+
+## Tailscale Tools
+
+Страница показывает статус сервиса, Tailscale IP, список peers, netcheck, логи и текущий `tailscale serve status`.
+
+Доступные действия:
+
+- start/stop/restart сервиса
+- enable/disable автозапуска
+- `tailscale up` / `tailscale down`
+- проброс LuCI через Tailscale Serve на порты `80` и `8081`
+- проброс SSH через Tailscale Serve на порт `2222`
 
 ## Telegram Updater
 
@@ -50,4 +64,3 @@ config settings 'settings'
 ```
 
 Без `bot_token` и `chat_id` сервис не стартует, это сделано специально.
-
