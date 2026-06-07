@@ -357,41 +357,83 @@ install_bin() {
 }
 
 ensure_conf() {
-	[ -f "$CONF" ] && return 0
-	touch "$CONF"
-	uci set podkop_updater.settings=settings
-	uci set podkop_updater.settings.bot_token=''
-	uci set podkop_updater.settings.chat_id=''
-	uci set podkop_updater.settings.admin_ids=''
+	[ -f "$CONF" ] || touch "$CONF"
+	uci -q get podkop_updater.settings >/dev/null || uci set podkop_updater.settings=settings
+	uci -q get podkop_updater.settings.bot_token >/dev/null || uci set podkop_updater.settings.bot_token=''
+	uci -q get podkop_updater.settings.chat_id >/dev/null || uci set podkop_updater.settings.chat_id=''
+	uci -q get podkop_updater.settings.check_interval >/dev/null || uci set podkop_updater.settings.check_interval='6'
+	uci -q get podkop_updater.settings.router_label >/dev/null || uci set podkop_updater.settings.router_label=''
+	uci -q get podkop_updater.settings.admin_ids >/dev/null || uci set podkop_updater.settings.admin_ids=''
+	uci -q get podkop_updater.settings.auto_update >/dev/null || uci set podkop_updater.settings.auto_update='0'
+	uci -q get podkop_updater.settings.auto_update_self >/dev/null || uci set podkop_updater.settings.auto_update_self='0'
+	uci -q get podkop_updater.settings.backup_keep >/dev/null || uci set podkop_updater.settings.backup_keep='10'
 	uci commit podkop_updater
+}
+
+uci_get() {
+	uci -q get "podkop_updater.settings.$1" 2>/dev/null || true
+}
+
+save_config() {
+	ensure_conf
+	uci set podkop_updater.settings=settings
+	if [ -n "${1:-}" ]; then
+		uci set "podkop_updater.settings.bot_token=$1"
+	fi
+	uci set "podkop_updater.settings.chat_id=${2:-}"
+	uci set "podkop_updater.settings.check_interval=${3:-6}"
+	uci set "podkop_updater.settings.router_label=${4:-}"
+	uci set "podkop_updater.settings.admin_ids=${5:-}"
+	uci set "podkop_updater.settings.auto_update=${6:-0}"
+	uci set "podkop_updater.settings.auto_update_self=${7:-0}"
+	uci set "podkop_updater.settings.backup_keep=${8:-10}"
+	uci commit podkop_updater
+	echo "saved"
 }
 
 status_json() {
 	ensure_conf
+	token="$(uci_get bot_token)"
+	if [ -n "$token" ]; then
+		bot_id="${token%%:*}"
+	else
+		bot_id=""
+	fi
 	version="$($BIN --version 2>&1 || $BIN version 2>&1 || true)"
 	service="$(/etc/init.d/podkop_updater status 2>&1 || true)"
 	autostart="$([ -e /etc/rc.d/S99podkop_updater ] && echo enabled || echo disabled)"
-	config="$(cat "$CONF" 2>/dev/null || true)"
 	logs="$(logread 2>/dev/null | grep -i podkop_updater | tail -60 || true)"
+	tmp_logs="$([ -f /tmp/podkop_update.log ] && tail -80 /tmp/podkop_update.log || true)"
 	printf '{'
 	field binary "$(ls -l "$BIN" 2>/dev/null || echo missing)"; printf ','
 	field version "$version"; printf ','
 	field service "$service"; printf ','
 	field autostart "$autostart"; printf ','
-	field config "$config"; printf ','
-	field logs "$logs"
+	field bot_id "$bot_id"; printf ','
+	field chat_id "$(uci_get chat_id)"; printf ','
+	field check_interval "$(uci_get check_interval)"; printf ','
+	field router_label "$(uci_get router_label)"; printf ','
+	field admin_ids "$(uci_get admin_ids)"; printf ','
+	field auto_update "$(uci_get auto_update)"; printf ','
+	field auto_update_self "$(uci_get auto_update_self)"; printf ','
+	field backup_keep "$(uci_get backup_keep)"; printf ','
+	field emergency_ips "$(uci_get emergency_ips)"; printf ','
+	field menu_mid "$(uci_get menu_mid)"; printf ','
+	field logs "$logs"; printf ','
+	field tmp_logs "$tmp_logs"
 	printf '}\n'
 }
 
 case "$1" in
 	status) status_json ;;
+	save) shift; save_config "$@" ;;
 	install) install_bin ;;
 	start) /etc/init.d/podkop_updater start 2>&1 ;;
 	stop) /etc/init.d/podkop_updater stop 2>&1 ;;
 	restart) /etc/init.d/podkop_updater restart 2>&1 ;;
 	enable) /etc/init.d/podkop_updater enable 2>&1 ;;
 	disable) /etc/init.d/podkop_updater disable 2>&1 ;;
-	*) echo "Usage: $0 status|install|start|stop|restart|enable|disable" >&2; exit 1 ;;
+	*) echo "Usage: $0 status|save|install|start|stop|restart|enable|disable" >&2; exit 1 ;;
 esac
 EOF_UPDATER_LUCI
 chmod +x /usr/libexec/podkop-updater-luci
@@ -471,21 +513,8 @@ STOP=10
 USE_PROCD=1
 
 PROG=/usr/bin/podkop_updater
-UCI_PKG=podkop_updater
-UCI_SEC=settings
 
 start_service() {
-	local token chat
-
-	config_load "$UCI_PKG"
-	config_get token "$UCI_SEC" bot_token
-	config_get chat "$UCI_SEC" chat_id
-
-	if [ -z "$token" ] || [ -z "$chat" ]; then
-		logger -t podkop_updater "not starting: bot_token or chat_id is empty"
-		return 0
-	fi
-
 	procd_open_instance
 	procd_set_param command "$PROG" --daemon
 	procd_set_param respawn 3600 5 5
@@ -501,7 +530,12 @@ uci -q get podkop_updater.settings >/dev/null || {
 	uci set podkop_updater.settings=settings
 	uci set podkop_updater.settings.bot_token=''
 	uci set podkop_updater.settings.chat_id=''
+	uci set podkop_updater.settings.check_interval='6'
+	uci set podkop_updater.settings.router_label=''
 	uci set podkop_updater.settings.admin_ids=''
+	uci set podkop_updater.settings.auto_update='0'
+	uci set podkop_updater.settings.auto_update_self='0'
+	uci set podkop_updater.settings.backup_keep='10'
 	uci commit podkop_updater
 }
 
@@ -577,6 +611,7 @@ var scriptPath = '/root/podkop-auto-update.sh';
 
 function run(args) { return fs.exec('/usr/libexec/podkop-auto-update-luci', args); }
 function parse(res) { try { return JSON.parse((res && res.stdout) || '{}'); } catch (e) { return {}; } }
+function val(v) { return (v || '').replace(/\n+$/g, '').trim(); }
 function pre(text) { return E('pre', { 'style': 'white-space:pre-wrap;max-height:340px;overflow:auto' }, text || '--'); }
 function row(name, value) { return E('tr', {}, [ E('td', { 'style': 'width:25%' }, name), E('td', {}, value || '--') ]); }
 function notify(res) { ui.addNotification(null, pre(((res && res.stdout) || '') + ((res && res.stderr) ? '\n' + res.stderr : '')), 'info'); }
@@ -631,17 +666,17 @@ cat >/www/luci-static/resources/view/podkop-updater/status.js <<'EOF_UPDATER_JS'
 'require ui';
 'require poll';
 
-var conf = '/etc/config/podkop_updater';
-
 function run(args) { return fs.exec('/usr/libexec/podkop-updater-luci', args); }
 function parse(res) { try { return JSON.parse((res && res.stdout) || '{}'); } catch (e) { return {}; } }
 function pre(text) { return E('pre', { 'style': 'white-space:pre-wrap;max-height:340px;overflow:auto' }, text || '--'); }
 function row(name, value) { return E('tr', {}, [ E('td', { 'style': 'width:25%' }, name), E('td', {}, value || '--') ]); }
 function notify(res) { ui.addNotification(null, pre(((res && res.stdout) || '') + ((res && res.stderr) ? '\n' + res.stderr : '')), 'info'); }
+function input(type, placeholder) { return E('input', { 'type': type || 'text', 'placeholder': placeholder || '', 'style': 'min-width:340px;max-width:100%' }); }
+function checkbox() { return E('input', { 'type': 'checkbox' }); }
 
 return view.extend({
 	load: function() {
-		return Promise.all([ L.resolveDefault(run([ 'status' ]), { stdout: '{}' }), L.resolveDefault(fs.read(conf), '') ]);
+		return L.resolveDefault(run([ 'status' ]), { stdout: '{}' });
 	},
 	refresh: function(nodes) {
 		return run([ 'status' ]).then(function(res) {
@@ -651,31 +686,94 @@ return view.extend({
 				row('Binary', d.binary),
 				row('Version', d.version),
 				row('Service', d.service),
-				row('Autostart', d.autostart)
+				row('Autostart', d.autostart),
+				row('Bot ID', val(d.bot_id)),
+				row('Chat ID', val(d.chat_id)),
+				row('Interval', val(d.check_interval) ? val(d.check_interval) + ' h' : '--'),
+				row('Router label', val(d.router_label)),
+				row('Admins', val(d.admin_ids)),
+				row('Auto-update Podkop', val(d.auto_update) === '1' ? 'enabled' : 'disabled'),
+				row('Auto-update updater', val(d.auto_update_self) === '1' ? 'enabled' : 'disabled'),
+				row('Backup keep', val(d.backup_keep)),
+				row('Emergency IPs', val(d.emergency_ips)),
+				row('Menu message ID', val(d.menu_mid))
 			]));
-			nodes.logs.textContent = d.logs || 'No logs';
+			nodes.logs.textContent = ((d.tmp_logs || '') + '\n' + (d.logs || '')).trim() || 'No logs';
+			if (nodes.form && !nodes.form.dataset.loaded) {
+				nodes.chat.value = val(d.chat_id);
+				nodes.interval.value = val(d.check_interval) || '6';
+				nodes.label.value = val(d.router_label);
+				nodes.admins.value = val(d.admin_ids);
+				nodes.autoPodkop.checked = val(d.auto_update) === '1';
+				nodes.autoSelf.checked = val(d.auto_update_self) === '1';
+				nodes.backupKeep.value = val(d.backup_keep) || '10';
+				nodes.form.dataset.loaded = '1';
+			}
 		});
 	},
 	render: function(data) {
-		var cfg = data[1] || '', summary = E('div'), logs = pre('loading');
-		var editor = E('textarea', { 'style': 'width:100%;min-height:220px;font-family:monospace' }, cfg);
+		var summary = E('div'), logs = pre('loading');
+		var token = input('password', 'Telegram bot token');
+		var chat = input('text', 'Telegram chat ID');
+		var interval = input('number', '6');
+		var label = input('text', 'Home');
+		var admins = input('text', '123456789 987654321');
+		var autoPodkop = checkbox();
+		var autoSelf = checkbox();
+		var backupKeep = input('number', '10');
+		var form = E('div', {});
 		var self = this;
 		function button(title, action, style) {
 			return E('button', { 'class': 'btn cbi-button cbi-button-' + (style || 'action'), 'click': function(ev) {
 				ev.preventDefault();
-				return run([ action ]).then(notify).then(function() { return self.refresh({ summary: summary, logs: logs }); });
+				return run([ action ]).then(notify).then(function() {
+					return self.refresh({ summary: summary, logs: logs, form: form, chat: chat, interval: interval, label: label, admins: admins, autoPodkop: autoPodkop, autoSelf: autoSelf, backupKeep: backupKeep });
+				});
 			}}, title);
 		}
-		poll.add(L.bind(this.refresh, this, { summary: summary, logs: logs }), 10);
-		setTimeout(L.bind(this.refresh, this, { summary: summary, logs: logs }), 100);
+		function saveButton() {
+			return E('button', { 'class': 'btn cbi-button cbi-button-apply', 'click': function(ev) {
+				ev.preventDefault();
+				return run([
+					'save',
+					token.value.trim(),
+					chat.value.trim(),
+					interval.value.trim() || '6',
+					label.value.trim(),
+					admins.value.trim(),
+					autoPodkop.checked ? '1' : '0',
+					autoSelf.checked ? '1' : '0',
+					backupKeep.value.trim() || '10'
+				]).then(function(res) {
+					token.value = '';
+					notify(res);
+				}).then(function() {
+					return run([ 'enable' ]).then(notify);
+				}).then(function() {
+					return run([ 'restart' ]).then(notify);
+				}).then(function() {
+					form.dataset.loaded = '';
+					return self.refresh({ summary: summary, logs: logs, form: form, chat: chat, interval: interval, label: label, admins: admins, autoPodkop: autoPodkop, autoSelf: autoSelf, backupKeep: backupKeep });
+				});
+			}}, 'Save settings and restart');
+		}
+		form.appendChild(E('table', { 'class': 'table' }, [
+			row('Bot token', token),
+			row('Chat ID', chat),
+			row('Check interval, hours', interval),
+			row('Router label', label),
+			row('Admin user IDs', admins),
+			row('Auto-update Podkop', autoPodkop),
+			row('Auto-update updater', autoSelf),
+			row('Backups to keep', backupKeep)
+		]));
+		poll.add(L.bind(this.refresh, this, { summary: summary, logs: logs, form: form, chat: chat, interval: interval, label: label, admins: admins, autoPodkop: autoPodkop, autoSelf: autoSelf, backupKeep: backupKeep }), 10);
+		setTimeout(L.bind(this.refresh, this, { summary: summary, logs: logs, form: form, chat: chat, interval: interval, label: label, admins: admins, autoPodkop: autoPodkop, autoSelf: autoSelf, backupKeep: backupKeep }), 100);
 		return E('div', { 'class': 'cbi-map' }, [
 			E('h2', {}, 'Podkop Updater TG'), summary,
 			E('p', {}, [ button('Install/update binary', 'install', 'apply'), ' ', button('Start', 'start', 'apply'), ' ', button('Stop', 'stop', 'reset'), ' ', button('Restart', 'restart'), ' ', button('Enable autostart', 'enable', 'apply'), ' ', button('Disable autostart', 'disable', 'reset') ]),
-			E('h3', {}, 'Config'), editor,
-			E('p', {}, E('button', { 'class': 'btn cbi-button cbi-button-apply', 'click': function(ev) {
-				ev.preventDefault();
-				return fs.write(conf, editor.value).then(function() { return run([ 'restart' ]); }).then(notify);
-			}}, 'Save config and restart')),
+			E('h3', {}, 'Settings'), form,
+			E('p', {}, saveButton()),
 			E('h3', {}, 'Log'), logs
 		]);
 	}

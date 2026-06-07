@@ -53,7 +53,20 @@ sh <(wget -O - https://raw.githubusercontent.com/irat25/podkop-router-tools/main
 
 ## Telegram Updater
 
-`Podkop Updater TG` устанавливает LuCI-страницу и init-скрипт. Бинарник `podkop_updater` скачивается с публичных релизов `VizzleTF/podkop_autoupdater`, если GitHub доступен с роутера.
+`Podkop Updater TG` устанавливает LuCI-страницу, init-скрипт и Go-бинарник `podkop_updater` с публичных релизов `VizzleTF/podkop_autoupdater`, если GitHub доступен с роутера.
+
+Страница LuCI повторяет основные настройки оригинального updater:
+
+- `bot_token` - токен Telegram-бота из `@BotFather`
+- `chat_id` - Telegram chat id из `@get_id_bot`
+- `check_interval` - часы между проверками, по умолчанию `6`
+- `router_label` - имя роутера в Telegram-дашборде
+- `admin_ids` - разрешённые Telegram user ID через пробел
+- `auto_update` - авто-обновление Podkop
+- `auto_update_self` - авто-обновление updater
+- `backup_keep` - сколько бэкапов хранить
+
+Текущий `bot_token` в LuCI не показывается: отображается только публичная часть `Bot ID`. Если поле token оставить пустым при сохранении, старый токен сохраняется.
 
 Чтобы сервис стартовал, заполните `/etc/config/podkop_updater`:
 
@@ -61,7 +74,12 @@ sh <(wget -O - https://raw.githubusercontent.com/irat25/podkop-router-tools/main
 config settings 'settings'
         option bot_token 'TELEGRAM_BOT_TOKEN'
         option chat_id 'TELEGRAM_CHAT_ID'
+        option check_interval '6'
+        option router_label 'Home'
         option admin_ids 'TELEGRAM_USER_ID'
+        option auto_update '0'
+        option auto_update_self '0'
+        option backup_keep '10'
 ```
 
-Без `bot_token` и `chat_id` сервис не стартует, это сделано специально.
+После запуска откройте Telegram-чат с ботом и отправьте `/menu`.
