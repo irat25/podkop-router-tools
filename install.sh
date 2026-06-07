@@ -330,12 +330,30 @@ field() {
 install_bin() {
 	api="https://api.github.com/repos/VizzleTF/podkop_autoupdater/releases/latest"
 	tmp="/tmp/podkop_updater.release.json"
+	bin_tmp="/tmp/podkop_updater.bin"
+	arch="$(uname -m 2>/dev/null || echo unknown)"
 	wget -q -T 30 -O "$tmp" "$api" || { echo "api_download_failed"; return 1; }
-	url="$(sed -n 's/.*"browser_download_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$tmp" | grep -Ei 'linux.*(arm64|aarch64)|aarch64.*linux|arm64.*linux' | head -1)"
-	[ -n "$url" ] || url="$(sed -n 's/.*"browser_download_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$tmp" | head -1)"
+	case "$arch" in
+		x86_64) want="amd64" ;;
+		aarch64|arm64) want="arm64" ;;
+		armv7*|armv6*) want="armv7" ;;
+		mipsel*|mipsle*) want="mipsle" ;;
+		mips*) want="mips" ;;
+		*) want="" ;;
+	esac
+	urls="$(tr ',' '\n' < "$tmp" | sed -n 's/.*"browser_download_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | grep -v '\.sha256$')"
+	[ -n "$want" ] && url="$(printf '%s\n' "$urls" | grep "/podkop_updater-$want$" | head -1)" || url=""
+	[ -n "$url" ] || url="$(printf '%s\n' "$urls" | head -1)"
 	[ -n "$url" ] || { echo "asset_not_found"; cat "$tmp"; return 1; }
 	echo "download $url"
-	wget -T 60 -O "$BIN" "$url" && chmod +x "$BIN"
+	wget -T 60 -O "$bin_tmp" "$url" || return 1
+	if [ "$(wc -c < "$bin_tmp" 2>/dev/null || echo 0)" -lt 100000 ]; then
+		echo "downloaded file is too small, refusing to install"
+		rm -f "$bin_tmp"
+		return 1
+	fi
+	mv "$bin_tmp" "$BIN"
+	chmod +x "$BIN"
 }
 
 ensure_conf() {
