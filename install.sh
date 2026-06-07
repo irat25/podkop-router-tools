@@ -17,8 +17,7 @@ mkdir -p \
 	/usr/share/rpcd/acl.d \
 	/www/luci-static/resources/view/podkop-watchdog \
 	/www/luci-static/resources/view/podkop-auto-update \
-	/www/luci-static/resources/view/podkop-updater \
-	/www/luci-static/resources/view/tailscale-tools
+	/www/luci-static/resources/view/podkop-updater
 
 cat >/root/podkop-watchdog.sh <<'EOF_WATCHDOG'
 #!/bin/sh
@@ -438,73 +437,6 @@ esac
 EOF_UPDATER_LUCI
 chmod +x /usr/libexec/podkop-updater-luci
 
-cat >/usr/libexec/tailscale-tools-luci <<'EOF_TAILSCALE_LUCI'
-#!/bin/sh
-
-json_escape() {
-	sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g; s/\r//g; s/$/\\n/' | tr -d '\n'
-}
-
-field() {
-	printf '"%s":"%s"' "$1" "$(printf '%s' "$2" | json_escape)"
-}
-
-service_status() {
-	if [ -x /etc/init.d/tailscale ]; then
-		/etc/init.d/tailscale status 2>&1 || true
-	else
-		echo "missing /etc/init.d/tailscale"
-	fi
-}
-
-autostart_status() {
-	ls /etc/rc.d/S*tailscale >/dev/null 2>&1 && echo enabled || echo disabled
-}
-
-tailscale_cmd() {
-	if command -v tailscale >/dev/null 2>&1; then
-		tailscale "$@" 2>&1 || true
-	else
-		echo "tailscale command not found"
-	fi
-}
-
-status_json() {
-	printf '{'
-	field service "$(service_status)"; printf ','
-	field autostart "$(autostart_status)"; printf ','
-	field ip "$(tailscale_cmd ip -4 | head -1)"; printf ','
-	field status "$(tailscale_cmd status)"; printf ','
-	field netcheck "$(tailscale_cmd netcheck)"; printf ','
-	field serve "$(tailscale_cmd serve status)"; printf ','
-	field logs "$(logread 2>/dev/null | grep -iE 'tailscale|tailscaled' | tail -120 || true)"
-	printf '}\n'
-}
-
-case "$1" in
-	status) status_json ;;
-	start) /etc/init.d/tailscale start 2>&1 ;;
-	stop) /etc/init.d/tailscale stop 2>&1 ;;
-	restart) /etc/init.d/tailscale restart 2>&1 ;;
-	enable) /etc/init.d/tailscale enable 2>&1 ;;
-	disable) /etc/init.d/tailscale disable 2>&1 ;;
-	up) tailscale_cmd up ;;
-	authkey)
-		[ -n "${2:-}" ] || { echo "auth key is empty" >&2; exit 1; }
-		tailscale_cmd up --authkey "$2"
-		;;
-	down) tailscale_cmd down ;;
-	serve-luci-80) tailscale_cmd serve --bg --tcp=80 tcp://127.0.0.1:80 ;;
-	serve-luci-8081) tailscale_cmd serve --bg --tcp=8081 tcp://127.0.0.1:80 ;;
-	serve-ssh-2222) tailscale_cmd serve --bg --tcp=2222 tcp://127.0.0.1:22 ;;
-	clear-serve-80) tailscale_cmd serve --tcp=80 off ;;
-	clear-serve-8081) tailscale_cmd serve --tcp=8081 off ;;
-	clear-serve-2222) tailscale_cmd serve --tcp=2222 off ;;
-	*) echo "Usage: $0 status|start|stop|restart|enable|disable|up|authkey|down|serve-luci-80|serve-luci-8081|serve-ssh-2222|clear-serve-80|clear-serve-8081|clear-serve-2222" >&2; exit 1 ;;
-esac
-EOF_TAILSCALE_LUCI
-chmod +x /usr/libexec/tailscale-tools-luci
-
 cat >/etc/init.d/podkop_updater <<'EOF_INIT'
 #!/bin/sh /etc/rc.common
 
@@ -780,107 +712,6 @@ return view.extend({
 });
 EOF_UPDATER_JS
 
-cat >/www/luci-static/resources/view/tailscale-tools/status.js <<'EOF_TAILSCALE_JS'
-'use strict';
-'require view';
-'require fs';
-'require ui';
-'require poll';
-
-function run(args) { return fs.exec('/usr/libexec/tailscale-tools-luci', args); }
-function parse(res) { try { return JSON.parse((res && res.stdout) || '{}'); } catch (e) { return {}; } }
-function pre(text) { return E('pre', { 'style': 'white-space:pre-wrap;max-height:360px;overflow:auto' }, text || '--'); }
-function row(name, value) { return E('tr', {}, [ E('td', { 'style': 'width:24%' }, name), E('td', {}, value || '--') ]); }
-function notify(res) { ui.addNotification(null, pre(((res && res.stdout) || '') + ((res && res.stderr) ? '\n' + res.stderr : '')), 'info'); }
-
-return view.extend({
-	load: function() {
-		return L.resolveDefault(run([ 'status' ]), { stdout: '{}' });
-	},
-	refresh: function(nodes) {
-		return run([ 'status' ]).then(function(res) {
-			var d = parse(res);
-			nodes.summary.innerHTML = '';
-			nodes.summary.appendChild(E('table', { 'class': 'table' }, [
-				row('Service', d.service),
-				row('Autostart', d.autostart),
-				row('Tailscale IPv4', d.ip),
-				row('Serve', pre(d.serve))
-			]));
-			nodes.status.textContent = d.status || '--';
-			nodes.netcheck.textContent = d.netcheck || '--';
-			nodes.logs.textContent = d.logs || 'No tailscale logs';
-		});
-	},
-	render: function() {
-		var summary = E('div'), status = pre('loading'), netcheck = pre('loading'), logs = pre('loading');
-		var authKey = E('input', {
-			'type': 'password',
-			'placeholder': 'Новый auth key',
-			'style': 'min-width:360px;max-width:100%;margin-right:8px'
-		});
-		var self = this;
-		function button(title, action, style) {
-			return E('button', { 'class': 'btn cbi-button cbi-button-' + (style || 'action'), 'click': function(ev) {
-				ev.preventDefault();
-				return run([ action ]).then(notify).then(function() {
-					return self.refresh({ summary: summary, status: status, netcheck: netcheck, logs: logs });
-				});
-			}}, title);
-		}
-		function authButton() {
-			return E('button', { 'class': 'btn cbi-button cbi-button-apply', 'click': function(ev) {
-				var key = authKey.value.trim();
-				ev.preventDefault();
-				if (!key) {
-					ui.addNotification(null, E('p', {}, 'Auth key is empty'), 'warning');
-					return Promise.resolve();
-				}
-				return run([ 'authkey', key ]).then(function(res) {
-					authKey.value = '';
-					notify(res);
-				}).then(function() {
-					return self.refresh({ summary: summary, status: status, netcheck: netcheck, logs: logs });
-				});
-			}}, 'Apply new auth key');
-		}
-		poll.add(L.bind(this.refresh, this, { summary: summary, status: status, netcheck: netcheck, logs: logs }), 8);
-		setTimeout(L.bind(this.refresh, this, { summary: summary, status: status, netcheck: netcheck, logs: logs }), 100);
-		return E('div', { 'class': 'cbi-map' }, [
-			E('h2', {}, 'Tailscale Tools'), summary,
-			E('h3', {}, 'Service'),
-			E('p', {}, [
-				button('Start', 'start', 'apply'), ' ',
-				button('Stop', 'stop', 'reset'), ' ',
-				button('Restart', 'restart'), ' ',
-				button('Enable autostart', 'enable', 'apply'), ' ',
-				button('Disable autostart', 'disable', 'reset')
-			]),
-			E('h3', {}, 'Tailscale'),
-			E('p', {}, [
-				button('tailscale up', 'up', 'apply'), ' ',
-				button('tailscale down', 'down', 'reset')
-			]),
-			E('p', {}, [ authKey, authButton() ]),
-			E('h3', {}, 'Tailscale Serve'),
-			E('p', {}, [
-				button('LuCI :80', 'serve-luci-80', 'apply'), ' ',
-				button('LuCI :8081', 'serve-luci-8081', 'apply'), ' ',
-				button('SSH :2222', 'serve-ssh-2222', 'apply')
-			]),
-			E('p', {}, [
-				button('Disable :80', 'clear-serve-80', 'reset'), ' ',
-				button('Disable :8081', 'clear-serve-8081', 'reset'), ' ',
-				button('Disable :2222', 'clear-serve-2222', 'reset')
-			]),
-			E('h3', {}, 'Peers'), status,
-			E('h3', {}, 'Netcheck'), netcheck,
-			E('h3', {}, 'Logs'), logs
-		]);
-	}
-});
-EOF_TAILSCALE_JS
-
 cat >/usr/share/luci/menu.d/luci-app-podkop-watchdog.json <<'EOF_MENU_WATCHDOG'
 {
 	"admin/services/podkop-watchdog": {
@@ -913,17 +744,6 @@ cat >/usr/share/luci/menu.d/luci-app-podkop-updater.json <<'EOF_MENU_UPDATER'
 	}
 }
 EOF_MENU_UPDATER
-
-cat >/usr/share/luci/menu.d/luci-app-tailscale-tools.json <<'EOF_MENU_TAILSCALE'
-{
-	"admin/vpn/tailscale-tools": {
-		"title": "Tailscale",
-		"order": 30,
-		"action": { "type": "view", "path": "tailscale-tools/status" },
-		"depends": { "acl": [ "luci-app-tailscale-tools" ] }
-	}
-}
-EOF_MENU_TAILSCALE
 
 cat >/usr/share/rpcd/acl.d/luci-app-podkop-watchdog.json <<'EOF_ACL_WATCHDOG'
 {
@@ -997,28 +817,6 @@ cat >/usr/share/rpcd/acl.d/luci-app-podkop-updater.json <<'EOF_ACL_UPDATER'
 }
 EOF_ACL_UPDATER
 
-cat >/usr/share/rpcd/acl.d/luci-app-tailscale-tools.json <<'EOF_ACL_TAILSCALE'
-{
-	"luci-app-tailscale-tools": {
-		"description": "Tailscale Tools",
-		"read": {
-			"cgi-io": [ "exec" ],
-			"file": {
-				"/usr/libexec/tailscale-tools-luci": [ "exec" ]
-			},
-			"ubus": { "file": [ "exec" ] }
-		},
-		"write": {
-			"cgi-io": [ "exec" ],
-			"file": {
-				"/usr/libexec/tailscale-tools-luci": [ "exec" ]
-			},
-			"ubus": { "file": [ "exec" ] }
-		}
-	}
-}
-EOF_ACL_TAILSCALE
-
 touch /etc/crontabs/root
 grep -v '/root/podkop-watchdog.sh' /etc/crontabs/root >/tmp/podkop-tools-cron 2>/dev/null || true
 echo '* * * * * /root/podkop-watchdog.sh' >> /tmp/podkop-tools-cron
@@ -1038,7 +836,7 @@ rm -f /tmp/podkop-tools-cron
 rm -rf /tmp/luci-* /tmp/luci-indexcache 2>/dev/null || true
 
 echo "Installed files:"
-ls -l /root/podkop-watchdog.sh /root/podkop-auto-update.sh /usr/libexec/podkop-watchdog-luci /usr/libexec/podkop-auto-update-luci /usr/libexec/podkop-updater-luci /usr/libexec/tailscale-tools-luci /etc/init.d/podkop_updater 2>/dev/null
+ls -l /root/podkop-watchdog.sh /root/podkop-auto-update.sh /usr/libexec/podkop-watchdog-luci /usr/libexec/podkop-auto-update-luci /usr/libexec/podkop-updater-luci /etc/init.d/podkop_updater 2>/dev/null
 ls -l /usr/bin/podkop_updater 2>/dev/null || true
 echo "Cron:"
 grep -E 'podkop-watchdog|podkop-auto-update' /etc/crontabs/root || true
@@ -1048,5 +846,4 @@ echo "LuCI:"
 echo "  /cgi-bin/luci/admin/services/podkop-watchdog"
 echo "  /cgi-bin/luci/admin/services/podkop-auto-update"
 echo "  /cgi-bin/luci/admin/services/podkop-updater"
-echo "  /cgi-bin/luci/admin/vpn/tailscale-tools"
 echo "== Done =="
