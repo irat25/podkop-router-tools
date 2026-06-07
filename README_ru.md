@@ -68,3 +68,16 @@ config settings 'settings'
 ```
 
 После запуска откройте Telegram-чат с ботом и отправьте `/menu`.
+## Отдельная установка Podkop Watchdog
+
+Если нужен только Watchdog без Auto Update и Telegram updater:
+
+```sh
+wget -O /tmp/install-watchdog.sh https://raw.githubusercontent.com/irat25/podkop-router-tools/main/install-watchdog.sh
+sh /tmp/install-watchdog.sh
+```
+
+После установки страница будет в LuCI:
+
+- `Services -> Podkop Watchdog`
+- `/cgi-bin/luci/admin/services/podkop-watchdog`
