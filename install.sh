@@ -340,6 +340,7 @@ install_bin() {
 
 ensure_conf() {
 	[ -f "$CONF" ] && return 0
+	touch "$CONF"
 	uci set podkop_updater.settings=settings
 	uci set podkop_updater.settings.bot_token=''
 	uci set podkop_updater.settings.chat_id=''
@@ -474,6 +475,7 @@ EOF_INIT
 chmod +x /etc/init.d/podkop_updater
 
 uci -q get podkop_updater.settings >/dev/null || {
+	touch /etc/config/podkop_updater
 	uci set podkop_updater.settings=settings
 	uci set podkop_updater.settings.bot_token=''
 	uci set podkop_updater.settings.chat_id=''
