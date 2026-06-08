@@ -81,3 +81,17 @@ sh /tmp/install-watchdog.sh
 
 - `Services -> Podkop Watchdog`
 - `/cgi-bin/luci/admin/services/podkop-watchdog`
+
+## Отдельная установка Tailscale Lite
+
+Лёгкая LuCI-страница для Tailscale/headscale без показа сохранённого ключа:
+
+```sh
+wget -O /tmp/install-tailscale-lite.sh https://raw.githubusercontent.com/irat25/podkop-router-tools/main/install-tailscale-lite.sh
+sh /tmp/install-tailscale-lite.sh
+```
+
+После установки страница будет в LuCI:
+
+- `VPN -> Tailscale Lite`
+- `/cgi-bin/luci/admin/vpn/tailscale-lite`
